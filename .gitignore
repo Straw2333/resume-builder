@@ -1,0 +1,19 @@
+# 依赖与构建产物
+web/node_modules/
+web/dist/
+
+# 本地数据库（含个人简历数据，不入库）
+server/data/
+
+# 二进制
+*.exe
+resume-server
+
+# 临时文件
+.tmp-*
+*.log
+.DS_Store
+Thumbs.db
+
+# ZCode 工作区文件
+.zcode/
