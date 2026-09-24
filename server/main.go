@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net"
@@ -57,6 +59,8 @@ func main() {
 	}))
 
 	ra := &api.ResumeAPI{DB: db}
+	r.POST("/api/upload", uploadHandler)
+	r.GET("/api/uploads/:name", uploadedFileHandler)
 	apiGroup := r.Group("/api/resumes")
 	{
 		apiGroup.GET("", ra.List)
@@ -135,6 +139,83 @@ func openBrowser(url string) {
 	_ = cmd.Start()
 }
 
+// ===== 头像上传 =====
+
+var imageExts = map[string]string{
+	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+	".gif": "image/gif", ".webp": "image/webp",
+}
+
+func uploadHandler(c *gin.Context) {
+	f, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "未收到文件"})
+		return
+	}
+	if f.Size > 5<<20 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "图片不能超过 5MB"})
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(f.Filename))
+	ctype, ok := imageExts[ext]
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "仅支持 png / jpg / jpeg / gif / webp 图片"})
+		return
+	}
+	if err := os.MkdirAll(filepath.Join("data", "uploads"), 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	name := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
+	if err := c.SaveUploadedFile(f, filepath.Join("data", "uploads", name)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"url": "/api/uploads/" + name, "contentType": ctype})
+}
+
+func uploadedFileHandler(c *gin.Context) {
+	name := c.Param("name")
+	if strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法文件名"})
+		return
+	}
+	p := filepath.Join("data", "uploads", name)
+	if _, err := os.Stat(p); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "文件不存在"})
+		return
+	}
+	ctype := "application/octet-stream"
+	if ct, ok := imageExts[strings.ToLower(filepath.Ext(name))]; ok {
+		ctype = ct
+	}
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	c.Data(http.StatusOK, ctype, mustReadFile(p))
+}
+
+func mustReadFile(p string) []byte {
+	b, _ := os.ReadFile(p)
+	return b
+}
+
+// avatarDataURI 将本站上传的头像转为 base64 内嵌，保证导出 PDF（file:// 临时文件）时图片可见；
+// 外链 URL 原样返回。
+func avatarDataURI(u string) string {
+	if !strings.HasPrefix(u, "/api/uploads/") {
+		return u
+	}
+	name := filepath.Base(u)
+	ctype, ok := imageExts[strings.ToLower(filepath.Ext(name))]
+	if !ok {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join("data", "uploads", name))
+	if err != nil {
+		return "" // 上传文件已丢失，渲染时不显示头像
+	}
+	return "data:" + ctype + ";base64," + base64.StdEncoding.EncodeToString(b)
+}
+
 // resolve 载入简历并解析为渲染数据（HTML / Markdown 渲染共用）
 func resolve(db *gorm.DB, c *gin.Context) (*model.Resume, *service.RenderData, bool) {
 	id, ok := api.ParseID(c)
@@ -145,6 +226,21 @@ func resolve(db *gorm.DB, c *gin.Context) (*model.Resume, *service.RenderData, b
 	if err := db.First(&m, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "简历不存在"})
 		return nil, nil, false
+	}
+	// 头像：本站上传的转为 base64 内嵌，导出 PDF（file://）也能显示
+	var bi map[string]json.RawMessage
+	if json.Unmarshal(m.BasicInfo, &bi) == nil {
+		var avatar string
+		if json.Unmarshal(bi["avatar"], &avatar) == nil && avatar != "" {
+			if dataURI := avatarDataURI(avatar); dataURI != "" {
+				if nb, err := json.Marshal(dataURI); err == nil {
+					bi["avatar"] = nb
+					if out, err := json.Marshal(bi); err == nil {
+						m.BasicInfo = out
+					}
+				}
+			}
+		}
 	}
 	d, err := service.Parse(m.BasicInfo, m.Sections, m.Theme)
 	if err != nil {

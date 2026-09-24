@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -88,7 +89,14 @@ func (a *ResumeAPI) Update(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "简历不存在"})
 		return
 	}
-	var in model.Resume
+	// 指针区分"未传字段"与"传了空值"，避免误清空
+	var in struct {
+		Title     string           `json:"title"`
+		Template  string           `json:"template"`
+		BasicInfo *json.RawMessage `json:"basicInfo"`
+		Sections  *json.RawMessage `json:"sections"`
+		Theme     *json.RawMessage `json:"theme"`
+	}
 	if err := c.ShouldBindJSON(&in); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -96,15 +104,17 @@ func (a *ResumeAPI) Update(c *gin.Context) {
 	if in.Title != "" {
 		r.Title = in.Title
 	}
-	r.Template = in.Template
-	if len(in.BasicInfo) > 0 {
-		r.BasicInfo = service.NormalizeBasic(in.BasicInfo)
+	if in.Template != "" {
+		r.Template = in.Template
 	}
-	if len(in.Sections) > 0 {
-		r.Sections = in.Sections
+	if in.BasicInfo != nil {
+		r.BasicInfo = service.NormalizeBasic(*in.BasicInfo)
 	}
-	if len(in.Theme) > 0 {
-		r.Theme = service.NormalizeTheme(in.Theme)
+	if in.Sections != nil {
+		r.Sections = *in.Sections
+	}
+	if in.Theme != nil {
+		r.Theme = service.NormalizeTheme(*in.Theme)
 	}
 	if err := a.DB.Save(&r).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

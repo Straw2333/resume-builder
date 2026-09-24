@@ -20,5 +20,6 @@ export default {
   update: (id, data) => http.put(`/${id}`, data).then((r) => r.data),
   remove: (id) => http.delete(`/${id}`).then((r) => r.data),
   duplicate: (id) => http.post(`/${id}/duplicate`).then((r) => r.data),
-  exportUrl: (id, format) => `/api/resumes/${id}/export?format=${format}`
+  exportUrl: (id, format) => `/api/resumes/${id}/export?format=${format}`,
+  upload: (formData) => axios.post('/api/upload', formData).then((r) => r.data)
 }

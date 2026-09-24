@@ -85,7 +85,7 @@
     <div class="contact">
       {{range .BasicInfo.Fields}}{{if and .Visible .Value}}<span class="ci">{{if eq $.Theme.FieldStyle "text"}}<span>{{.Label}}：</span><span>{{.Value}}</span>{{else if eq $.Theme.FieldStyle "plain"}}<span>{{.Value}}</span>{{else}}{{if ne .Icon "none"}}{{iconSVG .Icon}}{{end}}<span>{{.Value}}</span>{{end}}</span>{{end}}{{end}}
     </div>
-    {{if .BasicInfo.Avatar}}<img class="avatar" src="{{.BasicInfo.Avatar}}" alt="">{{end}}
+    {{avatarImg .BasicInfo.Avatar}}
   </div>
 
   {{range .Sections}}
