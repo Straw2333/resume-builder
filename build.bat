@@ -2,22 +2,25 @@
 setlocal
 cd /d %~dp0
 
-echo [1/3] 构建前端...
+echo [1/3] Building frontend...
 cd web
-call npm run build || (echo 前端构建失败 & exit /b 1)
+call npm run build
+if errorlevel 1 (echo Frontend build FAILED & exit /b 1)
 cd ..
 
-echo [2/3] 拷贝前端产物到 server/dist...
+echo [2/3] Copying frontend dist to server/dist...
 if exist server\dist rmdir /s /q server\dist
 mkdir server\dist
-xcopy web\dist server\dist /e /i /q >nul || (echo 拷贝失败 & exit /b 1)
+xcopy web\dist server\dist /e /i /q >nul
+if errorlevel 1 (echo Copy FAILED & exit /b 1)
 
-echo [3/3] 构建后端（嵌入前端）...
+echo [3/3] Building backend (embedding frontend)...
 cd server
 set CGO_ENABLED=0
-go build -ldflags "-s -w" -o 简历制作平台.exe . || (echo 后端构建失败 & exit /b 1)
+go build -trimpath -ldflags "-s -w" -o resume-builder.exe .
+if errorlevel 1 (echo Backend build FAILED & exit /b 1)
 cd ..
 
 echo.
-echo 构建完成: server\简历制作平台.exe
-echo 双击运行即可，数据保存在 exe 同目录的 data 文件夹
+echo Build OK: server\resume-builder.exe
+echo Double-click to run. Data is stored in the "data" folder next to the exe.
