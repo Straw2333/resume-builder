@@ -17,3 +17,7 @@ Thumbs.db
 
 # ZCode 工作区文件
 .zcode/
+
+# 嵌入用前端产物（构建脚本生成）
+server/dist/*
+!server/dist/.gitkeep

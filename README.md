@@ -92,39 +92,36 @@ npm run dev
 
 浏览器访问 **http://localhost:5173**
 
-### 生产部署（单进程）
+### 生产部署（单文件发布）
+
+前端构建产物会嵌入二进制（`go:embed`），**一个 exe 即完整程序**，双击运行自动打开浏览器：
 
 ```bash
-# 构建前端静态资源
-cd web
-npm run build            # 产物输出到 web/dist
+# 一键构建（Windows）
+build.bat
 
-# 构建后端二进制
+# 或手动：构建前端 → 拷贝到 server/dist → 构建后端
+cd web && npm run build
 cd ../server
-go build -o resume-server.exe .   # Linux: go build -o resume-server .
-./resume-server.exe              # 启动于 :8080
+rm -rf dist && mkdir dist && cp -r ../web/dist/* dist/   # Windows 用 xcopy
+CGO_ENABLED=0 go build -ldflags "-s -w" -o 简历制作平台.exe .
 ```
 
-生产模式下前端构建产物由 Vite 输出至 `web/dist`，可通过任意静态服务器托管，或将 `dist` 目录交给 Nginx：API 反代 `/api → 127.0.0.1:8080`。
+- 产物约 19MB，纯 Go 零依赖，拷贝到任意 Windows/Linux/macOS 机器直接运行
+- 8080 端口被占用时自动换可用端口；环境变量 `NO_OPEN=1` 可禁用自动开浏览器
+- 数据库自动生成在 exe 同目录 `data/` 下，绿色便携
 
-**Nginx 参考配置**：
+### 下载现成安装包
 
-```nginx
-server {
-    listen 80;
-    root /var/www/resume/web/dist;
-    index index.html;
+仓库配置了 GitHub Actions（`.github/workflows/release.yml`）：推送 `v*` 标签即自动构建 Windows / Linux / macOS 三个平台的可执行文件并发布到 [Releases](https://github.com/Straw2333/resume-builder/releases)：
 
-    location /api/ {
-        proxy_pass http://127.0.0.1:8080;
-    }
-    location / {
-        try_files $uri $uri/ /index.html;   # SPA 路由回退
-    }
-}
+```bash
+git tag v1.0.0 && git push origin v1.0.0
 ```
 
 ### Docker（可选示例）
+
+单文件二进制天然适合容器——一个拷贝即可运行：
 
 ```dockerfile
 FROM node:18-alpine AS web
@@ -135,17 +132,17 @@ COPY web/ ./
 RUN npm run build
 
 FROM golang:1.22-alpine AS server
+WORKDIR /app
+COPY server/go.mod server/go.sum ./server/
+COPY server/ ./server/
+COPY --from=web /app/web/dist ./server/dist
 WORKDIR /app/server
-COPY server/go.mod server/go.sum ./
-RUN go mod download
-COPY server/ ./
 RUN CGO_ENABLED=0 go build -o /resume-server .
 
 FROM alpine:3.19
 # PDF 导出需要 chromium；仅用 Word/MD 导出可去掉
 RUN apk add --no-cache chromium
 COPY --from=server /resume-server /usr/local/bin/
-COPY --from=web /app/web/dist /var/www/html
 EXPOSE 8080
 CMD ["resume-server"]
 ```

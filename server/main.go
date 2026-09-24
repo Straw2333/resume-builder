@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
-	_ "embed"
+	"embed"
 	"fmt"
+	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"unicode"
@@ -24,6 +28,12 @@ import (
 
 //go:embed template/resume.html
 var resumeTmpl string
+
+// distFS 前端构建产物（构建前由脚本把 web/dist 拷贝到 server/dist）。
+// 仓库中仅提交占位文件，未拷贝时编译仍可通过，只是不托管前端。
+//
+//go:embed all:dist
+var distFS embed.FS
 
 func main() {
 	if err := os.MkdirAll("data", 0755); err != nil {
@@ -59,10 +69,70 @@ func main() {
 		apiGroup.GET("/:id/export", exportHandler(db))
 	}
 
-	fmt.Println("简历平台后端启动: http://localhost:8080")
-	if err := r.Run(":8080"); err != nil {
+	// 前端已嵌入时托管静态资源 + SPA 回退（开发模式下 dist 为空则跳过）
+	sub, _ := fs.Sub(distFS, "dist")
+	indexHTML, indexErr := fs.ReadFile(sub, "index.html")
+	hasFrontend := indexErr == nil && len(indexHTML) > 0
+	if hasFrontend {
+		index := indexHTML
+		r.NoRoute(func(c *gin.Context) {
+			p := strings.TrimPrefix(c.Request.URL.Path, "/")
+			if strings.HasPrefix(p, "api/") {
+				c.JSON(http.StatusNotFound, gin.H{"error": "接口不存在"})
+				return
+			}
+			if p == "" {
+				p = "index.html"
+			}
+			if st, err := fs.Stat(sub, p); err == nil && !st.IsDir() {
+				if strings.HasPrefix(p, "assets/") {
+					c.Header("Cache-Control", "public, max-age=31536000, immutable")
+				}
+				http.ServeFileFS(c.Writer, c.Request, sub, p)
+				return
+			}
+			// SPA 路由回退
+			c.Data(http.StatusOK, "text/html; charset=utf-8", index)
+		})
+	}
+
+	// 端口：8080 被占用时自动换一个可用端口
+	ln, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		ln, err = net.Listen("tcp", ":0")
+		if err != nil {
+			panic("监听端口失败: " + err.Error())
+		}
+	}
+	addr := fmt.Sprintf("http://localhost:%d", ln.Addr().(*net.TCPAddr).Port)
+	if hasFrontend {
+		fmt.Println("简历平台已启动:", addr, "（按 Ctrl+C 退出）")
+		if os.Getenv("NO_OPEN") == "" {
+			go func() {
+				time.Sleep(300 * time.Millisecond)
+				openBrowser(addr)
+			}()
+		}
+	} else {
+		fmt.Println("简历平台后端启动:", addr, "（未嵌入前端，开发模式请访问 http://localhost:5173）")
+	}
+	if err := r.RunListener(ln); err != nil {
 		panic(err)
 	}
+}
+
+// openBrowser 用系统默认浏览器打开页面
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	_ = cmd.Start()
 }
 
 // resolve 载入简历并解析为渲染数据（HTML / Markdown 渲染共用）
