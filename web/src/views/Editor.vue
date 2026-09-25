@@ -427,7 +427,8 @@ function startResize(e) {
   const startX = e.clientX
   const startW = panelWidth.value
   const onMove = (ev) => {
-    panelWidth.value = Math.min(640, Math.max(280, startW + (startX - ev.clientX)))
+    // 手柄在面板右缘：向右拖加宽，向左拖缩窄
+    panelWidth.value = Math.min(640, Math.max(280, startW + (ev.clientX - startX)))
   }
   const onUp = () => {
     resizing.value = false
