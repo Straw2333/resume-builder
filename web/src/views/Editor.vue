@@ -11,6 +11,18 @@
           <el-icon v-if="saveState === 'saving'" class="is-loading"><Loading /></el-icon>
           {{ statusText }}
         </span>
+        <el-dropdown trigger="click" @command="onAICommand">
+          <el-button class="pill">
+            <el-icon><MagicStick /></el-icon>&nbsp;AI 优化
+            <el-icon class="caret"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="all"><el-icon><MagicStick /></el-icon>整份简历优化</el-dropdown-item>
+              <el-dropdown-item command="settings" divided><el-icon><Setting /></el-icon>AI 设置…</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-tooltip content="快捷键：Ctrl+S / ⌘S" placement="bottom">
           <el-button class="pill" :loading="saveState === 'saving'" @click="saveNow">
             <el-icon v-if="saveState !== 'saving'"><Check /></el-icon>&nbsp;保存
@@ -246,10 +258,18 @@
 
           <!-- 自我评价 -->
           <template v-if="s.type === 'evaluation'">
-            <el-input
-              v-model="s.content" type="textarea" :rows="5" class="grow"
-              placeholder="每行一条，例如：&#10;热爱技术，持续学习&#10;具备良好的沟通与团队协作能力"
-            />
+            <div class="field">
+              <div class="label-row">
+                <label>自我评价（每行一条）</label>
+                <el-button text type="primary" size="small" class="ai-link" @click="polishContent(s)">
+                  <el-icon><MagicStick /></el-icon>&nbsp;AI 润色
+                </el-button>
+              </div>
+              <el-input
+                v-model="s.content" type="textarea" :rows="5" class="grow"
+                placeholder="每行一条，例如：&#10;热爱技术，持续学习&#10;具备良好的沟通与团队协作能力"
+              />
+            </div>
           </template>
 
           <!-- 列表型模块 -->
@@ -269,7 +289,12 @@
                 <div class="field"><label>时间</label><el-input v-model="item.time" :placeholder="hintOf(s.type).timePh" /></div>
               </div>
               <div class="field">
-                <label>描述（支持加粗 / 列表 / 缩进，Ctrl+B 加粗，Tab 与 Shift+Tab 缩进）</label>
+                <div class="label-row">
+                  <label>描述（支持加粗 / 列表 / 缩进，Ctrl+B 加粗，Tab 与 Shift+Tab 缩进）</label>
+                  <el-button text type="primary" size="small" class="ai-link" @click="polishItem(s, item)">
+                    <el-icon><MagicStick /></el-icon>&nbsp;AI 润色
+                  </el-button>
+                </div>
                 <RichTextEditor v-model="item.desc" :placeholder="hintOf(s.type).descPh" />
               </div>
               <div class="field">
@@ -293,6 +318,14 @@
         </div>
       </main>
     </div>
+
+    <!-- AI 优化 -->
+    <AISettingsDialog v-model="showAISettings" />
+    <AIPolishDialog ref="polishDialog" v-model="showPolish" :target="polishTarget" @apply="applyPolish" />
+    <AIOptimizeAllDialog
+      ref="optimizeAllDialog" v-model="showOptimizeAll" :tasks="optimizeTasks"
+      @item-done="onOptimizeItemDone" @restore="restoreSections"
+    />
   </div>
 </template>
 
@@ -301,6 +334,9 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } 
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import RichTextEditor from '../components/RichTextEditor.vue'
+import AISettingsDialog from '../components/AISettingsDialog.vue'
+import AIPolishDialog from '../components/AIPolishDialog.vue'
+import AIOptimizeAllDialog from '../components/AIOptimizeAllDialog.vue'
 import api from '../api/resume'
 
 const route = useRoute()
@@ -533,26 +569,30 @@ function onKeydown(e) {
   }
 }
 
+// sections → 保存格式（tagsStr 拆回 tags 数组），保存与 AI 备份共用
+function sectionsToSave() {
+  return resume.sections.map((s) => ({
+    ...s,
+    items: (s.items || []).map((it) => ({
+      title: it.title || '', subtitle: it.subtitle || '', time: it.time || '',
+      desc: it.desc || '',
+      tags: (it.tagsStr || '').split(/[,，、\s]+/).filter(Boolean)
+    }))
+  }))
+}
+
 async function saveNow() {
   if (saveState.value === 'saving') return
   clearTimeout(timer)
   saveState.value = 'saving'
   try {
-    const sections = resume.sections.map((s) => ({
-      ...s,
-      items: (s.items || []).map((it) => ({
-        title: it.title || '', subtitle: it.subtitle || '', time: it.time || '',
-        desc: it.desc || '',
-        tags: (it.tagsStr || '').split(/[,，、\s]+/).filter(Boolean)
-      }))
-    }))
     await api.update(resume.id, {
       title: resume.title, template: 'classic',
       basicInfo: {
         name: basic.name, intent: basic.intent, avatar: basic.avatar,
         fields: JSON.parse(JSON.stringify(basic.fields))
       },
-      sections,
+      sections: sectionsToSave(),
       theme: { ...resume.theme }
     })
     saveState.value = 'saved'
@@ -582,6 +622,138 @@ async function download(format) {
     URL.revokeObjectURL(a.href)
     ElMessage.success('导出成功')
   } catch { /* 拦截器已提示 */ }
+}
+
+// ===== AI 优化 =====
+const showAISettings = ref(false)
+const showPolish = ref(false)
+const showOptimizeAll = ref(false)
+const polishTarget = ref(null)
+const optimizeTasks = ref([])
+const polishDialog = ref(null)
+const optimizeAllDialog = ref(null)
+
+async function ensureAIReady() {
+  try {
+    const s = await api.aiGetSettings()
+    if (!s.hasKey) {
+      showAISettings.value = true
+      ElMessage.info('请先完成 AI 设置')
+      return false
+    }
+    return true
+  } catch {
+    return false // 拦截器已提示
+  }
+}
+
+function onAICommand(cmd) {
+  if (cmd === 'settings') {
+    showAISettings.value = true
+  } else if (cmd === 'all') {
+    startOptimizeAll()
+  }
+}
+
+function polishItem(s, item) {
+  if (!item.desc || !item.desc.trim()) {
+    ElMessage.warning('这条还没有内容，先填写一些描述再润色')
+    return
+  }
+  ensureAIReady().then((ok) => {
+    if (!ok) return
+    polishTarget.value = {
+      kind: 'item-desc', sectionType: s.type, sectionTitle: s.title,
+      title: item.title, subtitle: item.subtitle, content: item.desc, section: s, item
+    }
+    polishDialog.value?.open()
+    showPolish.value = true
+  })
+}
+
+function polishContent(s) {
+  if (!s.content || !s.content.trim()) {
+    ElMessage.warning('自我评价还是空的，先填写再润色')
+    return
+  }
+  ensureAIReady().then((ok) => {
+    if (!ok) return
+    polishTarget.value = {
+      kind: 'section-content', sectionType: s.type, sectionTitle: s.title,
+      title: '', subtitle: '', content: plainLinesToHtml(s.content), section: s, item: null
+    }
+    polishDialog.value?.open()
+    showPolish.value = true
+  })
+}
+
+// AI 结果回填：条目描述存 HTML；自我评价存储格式是纯文本按行，需把 <li> 拆回行
+function applyPolish(html) {
+  const t = polishTarget.value
+  if (!t) return
+  if (t.kind === 'section-content') t.section.content = htmlToPlainLines(html)
+  else t.item.desc = html
+}
+
+// 整份优化：收集所有已填写内容（未开启模块跳过），备份后逐条处理
+function startOptimizeAll() {
+  ensureAIReady().then((ok) => {
+    if (!ok) return
+    const tasks = []
+    for (const s of resume.sections) {
+      if (!s.visible) continue
+      if (s.type === 'evaluation') {
+        if (s.content?.trim()) {
+          tasks.push({ kind: 'section-content', sectionType: s.type, sectionTitle: s.title, title: '', subtitle: '', content: s.content, section: s, item: null })
+        }
+        continue
+      }
+      for (const it of s.items || []) {
+        if (it.desc?.trim()) {
+          tasks.push({ kind: 'item-desc', sectionType: s.type, sectionTitle: s.title, title: it.title, subtitle: it.subtitle, content: it.desc, section: s, item: it })
+        }
+      }
+    }
+    localStorage.setItem('aiBackup:' + resume.id, JSON.stringify(sectionsToSave()))
+    optimizeTasks.value = tasks
+    optimizeAllDialog.value?.open()
+    showOptimizeAll.value = true
+  })
+}
+
+function onOptimizeItemDone(task, html) {
+  if (task.kind === 'section-content') task.section.content = htmlToPlainLines(html)
+  else task.item.desc = html
+}
+
+function restoreSections() {
+  const raw = localStorage.getItem('aiBackup:' + resume.id)
+  if (!raw) {
+    ElMessage.warning('没有找到优化前的备份')
+    return
+  }
+  const parsed = JSON.parse(raw)
+  resume.sections = parsed.map((s) => ({
+    ...s,
+    items: (s.items || []).map((it) => ({ ...it, tagsStr: (it.tags || []).join('、') }))
+  }))
+  ElMessage.success('已恢复到优化前的内容')
+}
+
+// 自我评价纯文本 → 简单 <ul>，仅用于弹窗展示与 AI 输入
+function plainLinesToHtml(text) {
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return '<ul>' + text.split('\n').filter((l) => l.trim()).map((l) => `<li>${esc(l.trim())}</li>`).join('') + '</ul>'
+}
+
+// AI 返回的 HTML → 纯文本按行（自我评价存储格式）
+function htmlToPlainLines(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const lis = doc.querySelectorAll('li')
+  if (lis.length) {
+    return Array.from(lis).map((li) => li.textContent.trim()).filter(Boolean).join('\n')
+  }
+  return doc.body.textContent.trim()
 }
 
 // ===== 模块管理 =====
@@ -735,6 +907,10 @@ onBeforeRouteLeave(async () => {
 .panel-tip { font-size: 12px; color: #94a3b8; font-weight: 400; margin-left: auto; }
 .field { margin-bottom: 10px; }
 .field label { display: block; font-size: 12px; color: #64748b; margin-bottom: 4px; }
+/* label 行：左侧说明文字 + 右侧 AI 润色入口 */
+.label-row { display: flex; align-items: center; gap: 6px; }
+.label-row label { flex: 1; margin-bottom: 0; }
+.ai-link { padding: 2px 4px; height: auto; flex-shrink: 0; }
 .field-row { display: flex; gap: 10px; }
 .field-row .field { flex: 1; min-width: 0; }
 .grow { width: 100%; }

@@ -46,7 +46,7 @@ func main() {
 	if err != nil {
 		panic("打开数据库失败: " + err.Error())
 	}
-	if err := db.AutoMigrate(&model.Resume{}); err != nil {
+	if err := db.AutoMigrate(&model.Resume{}, &model.Setting{}); err != nil {
 		panic("建表失败: " + err.Error())
 	}
 
@@ -61,6 +61,14 @@ func main() {
 	ra := &api.ResumeAPI{DB: db}
 	r.POST("/api/upload", uploadHandler)
 	r.GET("/api/uploads/:name", uploadedFileHandler)
+	aiGroup := r.Group("/api/ai")
+	{
+		aa := &api.AIAPI{DB: db}
+		aiGroup.GET("/settings", aa.GetSettings)
+		aiGroup.PUT("/settings", aa.SaveSettings)
+		aiGroup.POST("/test", aa.Test)
+		aiGroup.POST("/polish", aa.Polish)
+	}
 	apiGroup := r.Group("/api/resumes")
 	{
 		apiGroup.GET("", ra.List)

@@ -6,9 +6,14 @@
           <span class="brand-mark">简</span>
           <span class="brand-name">简历制作平台</span>
         </div>
-        <el-button type="primary" class="pill" size="large" @click="createResume">
-          <el-icon><Plus /></el-icon>&nbsp;新建简历
-        </el-button>
+        <div class="topbar-actions">
+          <el-button class="pill" @click="showAISettings = true">
+            <el-icon><MagicStick /></el-icon>&nbsp;AI 设置
+          </el-button>
+          <el-button type="primary" class="pill" size="large" @click="createResume">
+            <el-icon><Plus /></el-icon>&nbsp;新建简历
+          </el-button>
+        </div>
       </div>
     </header>
 
@@ -53,6 +58,8 @@
         </el-col>
       </el-row>
     </main>
+
+    <AISettingsDialog v-model="showAISettings" />
   </div>
 </template>
 
@@ -60,11 +67,13 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import AISettingsDialog from '../components/AISettingsDialog.vue'
 import api from '../api/resume'
 
 const router = useRouter()
 const resumes = ref([])
 const loading = ref(false)
+const showAISettings = ref(false)
 
 onMounted(load)
 
@@ -133,6 +142,7 @@ async function onCommand(cmd, r) {
   display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 20px;
 }
 .brand-name { font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+.topbar-actions { display: flex; align-items: center; gap: 12px; }
 .pill { border-radius: 999px; }
 .content { max-width: 1280px; margin: 28px auto; padding: 0 24px; min-height: calc(100vh - 140px); }
 .resume-card { margin-bottom: 20px; border-radius: 12px; border: 1px solid #e2e8f0; }
