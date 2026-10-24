@@ -266,6 +266,8 @@ func RenderHTML(tmplSrc string, d *RenderData) (string, error) {
 	t, err := template.New("resume").Funcs(template.FuncMap{
 		"splitLines": splitLines,
 		"richText":   func(s string) template.HTML { return template.HTML(RichHTML(s)) },
+		// 按行渲染的自我评价：剥离行首 Markdown 列表标记，避免出现 "- - 内容"
+		"listLine": func(s string) string { return stripListMarker(s) },
 		// 头像可能是 data: URI，html/template 会拦截该 scheme，这里整标签输出
 		"avatarImg": func(u string) template.HTML {
 			if u == "" {

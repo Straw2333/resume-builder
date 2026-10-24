@@ -68,11 +68,14 @@ func main() {
 		aiGroup.PUT("/settings", aa.SaveSettings)
 		aiGroup.POST("/test", aa.Test)
 		aiGroup.POST("/polish", aa.Polish)
+		aiGroup.POST("/generate-from-jd", aa.GenerateFromJD)
 	}
 	apiGroup := r.Group("/api/resumes")
 	{
 		apiGroup.GET("", ra.List)
 		apiGroup.POST("", ra.Create)
+		apiGroup.GET("/template", ra.DownloadTemplate)
+		apiGroup.POST("/import", ra.ImportMarkdown)
 		apiGroup.GET("/:id", ra.Get)
 		apiGroup.PUT("/:id", ra.Update)
 		apiGroup.DELETE("/:id", ra.Delete)

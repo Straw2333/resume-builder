@@ -7,6 +7,8 @@ server/data/
 
 # 二进制
 *.exe
+*.exe*
+*.bak*
 resume-server
 
 # 临时文件

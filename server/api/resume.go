@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -158,3 +159,69 @@ func (a *ResumeAPI) Duplicate(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, cp)
 }
+
+// DownloadTemplate 下载标准 Markdown 简历填写模板
+func (a *ResumeAPI) DownloadTemplate(c *gin.Context) {
+	c.Header("Content-Disposition", `attachment; filename="resume-template.md"; filename*=UTF-8''%E7%AE%80%E5%8E%86%E5%A1%AB%E5%86%99%E6%A8%A1%E6%9D%BF.md`)
+	c.Data(http.StatusOK, "text/markdown; charset=utf-8", []byte(service.MarkdownTemplate()))
+}
+
+// ImportMarkdown 导入按模板编写的 Markdown 简历（resumeId > 0 时覆盖指定简历，否则新建简历）
+func (a *ResumeAPI) ImportMarkdown(c *gin.Context) {
+	var in struct {
+		Title    string `json:"title"`
+		Content  string `json:"content"`
+		ResumeID uint   `json:"resumeId"`
+	}
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式错误: " + err.Error()})
+		return
+	}
+	if strings.TrimSpace(in.Content) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "导入的模板内容不能为空"})
+		return
+	}
+	parsedTitle, basicJSON, sectionsJSON, err := service.ParseMarkdown(in.Content)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "模板解析失败: " + err.Error()})
+		return
+	}
+
+	if in.ResumeID > 0 {
+		var r model.Resume
+		if err := a.DB.First(&r, in.ResumeID).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "简历不存在"})
+			return
+		}
+		if r.Title == "" || r.Title == "未命名简历" || r.Title == "我的简历" {
+			r.Title = parsedTitle
+		}
+		r.BasicInfo = basicJSON
+		r.Sections = sectionsJSON
+		r.Theme = service.NormalizeTheme(r.Theme)
+		if err := a.DB.Save(&r).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, r)
+		return
+	}
+
+	title := strings.TrimSpace(in.Title)
+	if title == "" || title == "简历填写模板" || title == "resume-template" {
+		title = parsedTitle
+	}
+	r := model.Resume{
+		Title:     title,
+		Template:  "classic",
+		BasicInfo: basicJSON,
+		Sections:  sectionsJSON,
+		Theme:     service.NormalizeTheme(model.DefaultTheme()),
+	}
+	if err := a.DB.Create(&r).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, r)
+}
+

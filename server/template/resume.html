@@ -5,8 +5,9 @@
 <title>{{.BasicInfo.Name}} - {{.Title}}</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  html, body { background: #e2e8f0; }
+  html, body { margin: 0; background: transparent; }
   body { font-family: "IBM Plex Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; color: #1a1a1a; }
+  .pages { width: 794px; margin: 0 auto; }
   .page {
     --ribbon: {{.Theme.Dark}}; --accent: {{.Theme.Accent}};
     --cn: "Noto Sans SC", "PingFang SC", "Microsoft YaHei";
@@ -14,6 +15,15 @@
     width: 794px; min-height: 1123px; margin: 0 auto; background: #fff;
     padding: 40px 44px 48px; font-size: 14px; line-height: 1.6;
   }
+  /* JS 分页后：每页固定 A4 高度，超出内容移到下一页 */
+  body.paged .page {
+    height: 1123px; min-height: 1123px; overflow: hidden;
+    border-radius: 4px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.25);
+  }
+  body.paged .page + .page { margin-top: 28px; }
+  /* 分页后模块不再包裹在 .section 内，丝带标题保持原有 18px 顶部间距 */
+  body.paged .page > .ribbon { margin-top: 18px; }
   /* 中文字体（仅作用于中文字形） */
   .cn-yahei { --cn: "Microsoft YaHei", "PingFang SC"; }
   .cn-ping { --cn: "PingFang SC", "Microsoft YaHei"; }
@@ -72,7 +82,14 @@
   .rich ul, .rich ol { margin: 2px 0; padding-left: 20px; }
   .rich li { margin: 2px 0; }
   .rich p { margin: 0; }
-  @media print { html, body { background: #fff; } .page { margin: 0; } }
+  /* PDF 导出（无头浏览器打印）与分页保持一致 */
+  @page { size: 210mm 297mm; margin: 0; }
+  @media print {
+    html, body { background: #fff; }
+    .pages { width: auto; margin: 0; }
+    .page { margin: 0 !important; border-radius: 0; box-shadow: none; }
+    body.paged .page + .page { margin-top: 0 !important; page-break-before: always; break-before: page; }
+  }
 </style>
 </head>
 <body>
@@ -92,7 +109,7 @@
   <div class="section">
     <h2 class="ribbon">{{.Title}}</h2>
     {{if eq .Type "evaluation"}}
-      <ul class="desc">{{range splitLines .Content}}{{if .}}<li><p>{{.}}</p></li>{{end}}{{end}}</ul>
+      <ul class="desc">{{range splitLines .Content}}{{if .}}<li><p>{{listLine .}}</p></li>{{end}}{{end}}</ul>
     {{else}}
       {{range .Items}}
       <div class="item">
@@ -111,5 +128,201 @@
   </div>
   {{end}}
 </div>
+
+<script>
+(function () {
+  'use strict'
+  var PAGE_H = 1123 // A4 高度（96dpi 像素）
+  var GAP = 28      // 屏幕上两张纸之间的间隙
+  var doc = document
+  var pristine = null
+
+  function makePage() {
+    var p = doc.createElement('div')
+    p.className = 'page'
+    p._lastUL = null
+    return p
+  }
+
+  function fits(page) {
+    return page.scrollHeight <= PAGE_H + 1
+  }
+
+  // 把原始 .page 内容拆成最小可单独分页的单元：
+  // header、每个模块的丝带标题、每个条目 / 列表项；条目粒度保证整行不被拦腰截断
+  function collectUnits(paper) {
+    var units = []
+    var header = paper.querySelector(':scope > .header')
+    if (header) units.push({ node: header, kind: 'header', sec: -1, title: '' })
+    var secs = paper.querySelectorAll(':scope > .section')
+    for (var s = 0; s < secs.length; s++) {
+      var sec = secs[s]
+      var ribbon = sec.querySelector(':scope > .ribbon')
+      if (ribbon) {
+        units.push({ node: ribbon, kind: 'ribbon', sec: s, title: ribbon.textContent })
+        ribbon.remove()
+      }
+      var cs = sec.querySelectorAll(':scope > *')
+      for (var c = 0; c < cs.length; c++) {
+        var ch = cs[c]
+        if (ch.tagName === 'UL') {
+          var lis = ch.querySelectorAll(':scope > li')
+          if (lis.length > 1) {
+            for (var l = 0; l < lis.length; l++) {
+              units.push({ node: lis[l], kind: 'li', sec: s, cls: (ch.className || '').trim() })
+            }
+            continue
+          }
+        }
+        units.push({ node: ch, kind: 'block', sec: s, cls: '' })
+      }
+    }
+    return units
+  }
+
+  // 单元放入页面；li 会自动归入同模块的 <ul> 容器
+  function appendUnit(page, u) {
+    if (u.kind === 'li') {
+      if (!(page._lastUL && page._lastUL._cls === u.cls && page._lastUL.parentNode === page)) {
+        var ul = doc.createElement('ul')
+        ul.className = u.cls
+        ul._cls = u.cls
+        page.appendChild(ul)
+        page._lastUL = ul
+      }
+      page._lastUL.appendChild(u.node)
+    } else {
+      page._lastUL = null
+      page.appendChild(u.node)
+    }
+  }
+
+  function removeUnit(page, u) {
+    u.node.remove()
+    if (u.kind === 'li' && page._lastUL && !page._lastUL.hasChildNodes()) {
+      page._lastUL.remove()
+      page._lastUL = null
+    }
+  }
+
+  function contRibbon(title) {
+    var r = doc.createElement('h2')
+    r.className = 'ribbon'
+    r.textContent = title + '（续）'
+    return r
+  }
+
+  // 清理编辑器遗留的空列表项 / 空段落：无文本且无图片、子列表的 <li>/<div>/<p>
+  function pruneBlank(b) {
+    var lis = b.querySelectorAll('li,div,p')
+    for (var i = lis.length - 1; i >= 0; i--) {
+      var n = lis[i]
+      if (n.tagName === 'LI') {
+        if (n.querySelector('ul,ol,img')) continue
+        if ((n.textContent || '').replace(/[\s\u00a0\u3000]/g, '') === '') n.remove()
+      }
+    }
+    var us = b.querySelectorAll('ul,ol')
+    for (var j = 0; j < us.length; j++) {
+      if (!us[j].hasChildNodes()) us[j].remove()
+    }
+  }
+
+  function paginate(paper) {
+    var clone = paper.cloneNode(true)
+    pruneBlank(clone)
+    var units = collectUnits(clone)
+    var wrap = doc.createElement('div')
+    wrap.className = 'pages'
+    doc.body.appendChild(wrap)
+    var page = null
+    var started = {}
+    var secTitles = {}
+
+    // 开新页；continuation = 页首需要补接续丝带（当前模块在上一页已经出现）
+    function newPage(continuation, u) {
+      page = makePage()
+      wrap.appendChild(page)
+      if (continuation && u && u.kind !== 'header' && u.sec >= 0 && started[u.sec]) {
+        page.appendChild(contRibbon(secTitles[u.sec] || ''))
+        page._lastUL = null
+      }
+      return page
+    }
+
+    // 放置内容单元：当前页装不下时整块移到下一页（智能合页）
+    function placeContent(u) {
+      appendUnit(page, u)
+      if (fits(page)) return true
+      removeUnit(page, u)
+      newPage(true, u)
+      appendUnit(page, u)
+      // 单元本身超过一页高度时只能截断显示，避免死循环
+      return fits(page)
+    }
+
+    for (var i = 0; i < units.length; i++) {
+      var u = units[i]
+      if (!page) newPage(false, null)
+      if (u.kind === 'header') {
+        page.appendChild(u.node)
+        continue
+      }
+      if (u.kind === 'ribbon') {
+        placeContent(u)
+        started[u.sec] = true
+        secTitles[u.sec] = u.title
+        // 孤行保护：标题若与第一个内容块放不下同一页，则两者一起换页
+        var nx = units[i + 1]
+        if (nx && nx.sec === u.sec && (nx.kind === 'block' || nx.kind === 'li')) {
+          appendUnit(page, nx)
+          if (!fits(page)) {
+            removeUnit(page, nx)
+            u.node.remove()
+            newPage(false, null)
+            page.appendChild(u.node)
+            if (!fits(page)) {
+              // 单条内容块超过一页：标题保留在页首，内容块交给下一轮整块放置
+            }
+          }
+        }
+        continue
+      }
+      placeContent(u)
+    }
+    return wrap
+  }
+
+  function report() {
+    var pages = document.querySelectorAll('.pages > .page').length
+    try {
+      window.parent.postMessage({
+        type: 'resume-pages',
+        pages: pages,
+        height: pages * PAGE_H + (pages > 1 ? (pages - 1) * GAP : 0)
+      }, '*')
+    } catch (e) {}
+  }
+
+  function rebuild() {
+    if (!pristine) {
+      var p = document.querySelector('.page')
+      if (p) pristine = p.cloneNode(true)
+    }
+    if (!pristine) return
+    doc.body.classList.add('paged')
+    var old = document.querySelector('.pages')
+    if (old) old.remove()
+    var oldPage = document.querySelector('.page')
+    if (oldPage) oldPage.remove()
+    paginate(pristine)
+    report()
+  }
+
+  rebuild()
+  // 图片加载完成后重排一次，保证高度测量准确
+  window.addEventListener('load', function () { rebuild() })
+})()
+</script>
 </body>
 </html>

@@ -27,14 +27,17 @@
 
     <main class="canvas">
       <div class="paper">
-        <iframe v-if="src" :src="src" title="简历预览"></iframe>
+        <iframe
+          v-if="src" :src="src" title="简历预览"
+          :style="{ height: iframeHeight + 'px' }"
+        ></iframe>
       </div>
     </main>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api/resume'
@@ -42,9 +45,23 @@ import api from '../api/resume'
 const route = useRoute()
 const src = ref('')
 const exporting = ref('')
+const iframeHeight = ref(1123)
+
+// 简历纸张分页完成后上报高度，多页时 iframe 自动加高
+function onPageHeight(e) {
+  const d = e.data
+  if (d && d.type === 'resume-pages' && d.height > 0) {
+    iframeHeight.value = d.height
+  }
+}
 
 onMounted(() => {
   src.value = `/api/resumes/${route.params.id}/preview?t=${Date.now()}`
+  window.addEventListener('message', onPageHeight)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('message', onPageHeight)
 })
 
 async function download(format) {
@@ -88,9 +105,6 @@ async function download(format) {
   background: linear-gradient(rgb(62,76,94) 0%, rgb(74,85,104) 50%, rgb(45,55,72) 100%);
   display: flex; justify-content: center; align-items: flex-start;
 }
-.paper {
-  width: 794px; flex-shrink: 0; background: #fff; border-radius: 4px;
-  box-shadow: 0 8px 32px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.25); overflow: hidden;
-}
-.paper iframe { width: 794px; height: 1123px; border: none; display: block; background: #fff; }
+.paper { width: 794px; flex-shrink: 0; }
+.paper iframe { width: 794px; border: none; display: block; background: transparent; }
 </style>

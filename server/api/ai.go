@@ -168,3 +168,23 @@ func (a *AIAPI) Polish(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"html": html})
 }
+
+// GenerateFromJD 根据招聘岗位 JD（及可选个人背景、追问指令）生成结构化简历内容。
+func (a *AIAPI) GenerateFromJD(c *gin.Context) {
+	cfg, err := a.loadSettings()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var in service.GenerateFromJDInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	res, err := service.GenerateFromJD(cfg, &in)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}

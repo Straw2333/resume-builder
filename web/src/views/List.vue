@@ -10,6 +10,19 @@
           <el-button class="pill" @click="showAISettings = true">
             <el-icon><MagicStick /></el-icon>&nbsp;AI 设置
           </el-button>
+          <el-button class="pill" @click="downloadTemplate">
+            <el-icon><Download /></el-icon>&nbsp;下载模板
+          </el-button>
+          <el-button class="pill" :loading="importing" @click="triggerImport">
+            <el-icon v-if="!importing"><Upload /></el-icon>&nbsp;导入模板
+          </el-button>
+          <input
+            ref="fileInput" type="file" accept=".md,.markdown,.txt" style="display: none"
+            @change="onFileSelected"
+          />
+          <el-button type="primary" plain class="pill" size="large" @click="openJDGenerate">
+            <el-icon><MagicStick /></el-icon>&nbsp;AI 根据 JD 生成
+          </el-button>
           <el-button type="primary" class="pill" size="large" @click="createResume">
             <el-icon><Plus /></el-icon>&nbsp;新建简历
           </el-button>
@@ -18,7 +31,10 @@
     </header>
 
     <main class="content">
-      <el-empty v-if="!loading && resumes.length === 0" description="还没有简历，点击右上角新建一份吧">
+      <el-empty v-if="!loading && resumes.length === 0" description="还没有简历，点击右上角新建、导入模板或由 AI 根据 JD 生成吧">
+        <el-button @click="downloadTemplate">下载填写模板</el-button>
+        <el-button @click="triggerImport">导入模板</el-button>
+        <el-button type="primary" plain @click="openJDGenerate">AI 根据 JD 生成</el-button>
         <el-button type="primary" @click="createResume">新建简历</el-button>
       </el-empty>
 
@@ -60,6 +76,7 @@
     </main>
 
     <AISettingsDialog v-model="showAISettings" />
+    <AIJDGenerateDialog ref="jdDialog" v-model="showJDGenerate" mode="create" @apply="onCreateFromJD" />
   </div>
 </template>
 
@@ -68,14 +85,45 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AISettingsDialog from '../components/AISettingsDialog.vue'
+import AIJDGenerateDialog from '../components/AIJDGenerateDialog.vue'
 import api from '../api/resume'
 
 const router = useRouter()
 const resumes = ref([])
 const loading = ref(false)
 const showAISettings = ref(false)
+const showJDGenerate = ref(false)
+const jdDialog = ref(null)
+const fileInput = ref(null)
+const importing = ref(false)
 
 onMounted(load)
+
+function downloadTemplate() {
+  window.open(api.templateUrl(), '_blank')
+}
+
+function triggerImport() {
+  if (fileInput.value) {
+    fileInput.value.value = ''
+    fileInput.value.click()
+  }
+}
+
+async function onFileSelected(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  importing.value = true
+  try {
+    const content = await file.text()
+    const baseName = file.name.replace(/\.(md|markdown|txt)$/i, '').trim()
+    const r = await api.importMarkdown({ title: baseName, content })
+    ElMessage.success('模板导入成功，已为您生成简历')
+    router.push(`/edit/${r.id}`)
+  } catch { /* 拦截器已提示 */ } finally {
+    importing.value = false
+  }
+}
 
 async function load() {
   loading.value = true
@@ -93,6 +141,31 @@ async function createResume() {
   })
   const r = await api.create({ title: value.trim() })
   ElMessage.success('创建成功')
+  router.push(`/edit/${r.id}`)
+}
+
+async function openJDGenerate() {
+  try {
+    const s = await api.aiGetSettings()
+    if (!s.hasKey) {
+      showAISettings.value = true
+      ElMessage.info('请先完成 AI 设置')
+      return
+    }
+    jdDialog.value?.open()
+    showJDGenerate.value = true
+  } catch {
+    // 拦截器已提示
+  }
+}
+
+async function onCreateFromJD(payload) {
+  const r = await api.create({
+    title: payload.title,
+    basicInfo: { name: '', intent: payload.intent },
+    sections: payload.sections
+  })
+  ElMessage.success('已根据 JD 生成简历，请结合个人实际情况微调细节')
   router.push(`/edit/${r.id}`)
 }
 

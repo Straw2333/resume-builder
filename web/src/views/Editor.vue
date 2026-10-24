@@ -11,6 +11,22 @@
           <el-icon v-if="saveState === 'saving'" class="is-loading"><Loading /></el-icon>
           {{ statusText }}
         </span>
+        <el-dropdown trigger="click" @command="onTemplateCommand">
+          <el-button class="pill" :loading="importingMd">
+            <el-icon v-if="!importingMd"><Upload /></el-icon>&nbsp;模板
+            <el-icon class="caret"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="import"><el-icon><Upload /></el-icon>导入模板（覆盖当前简历）</el-dropdown-item>
+              <el-dropdown-item command="download"><el-icon><Download /></el-icon>下载填写模板 (.md)</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <input
+          ref="mdFileInput" type="file" accept=".md,.markdown,.txt" style="display: none"
+          @change="onMdFileSelected"
+        />
         <el-dropdown trigger="click" @command="onAICommand">
           <el-button class="pill">
             <el-icon><MagicStick /></el-icon>&nbsp;AI 优化
@@ -18,7 +34,9 @@
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
+              <el-dropdown-item command="jd"><el-icon><DocumentAdd /></el-icon>根据 JD 生成简历内容</el-dropdown-item>
               <el-dropdown-item command="all"><el-icon><MagicStick /></el-icon>整份简历优化</el-dropdown-item>
+              <el-dropdown-item v-if="hasAIBackup" command="restore"><el-icon><RefreshLeft /></el-icon>恢复优化前备份</el-dropdown-item>
               <el-dropdown-item command="settings" divided><el-icon><Setting /></el-icon>AI 设置…</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -290,7 +308,7 @@
               </div>
               <div class="field">
                 <div class="label-row">
-                  <label>描述（支持加粗 / 列表 / 缩进，Ctrl+B 加粗，Tab 与 Shift+Tab 缩进）</label>
+                  <label>描述（Ctrl+B 加粗；输入 - 或 1. 加空格即变列表，支持 **加粗**）</label>
                   <el-button text type="primary" size="small" class="ai-link" @click="polishItem(s, item)">
                     <el-icon><MagicStick /></el-icon>&nbsp;AI 润色
                   </el-button>
@@ -311,10 +329,13 @@
         </template>
       </aside>
 
-      <!-- 深色画布：A4 实时预览 -->
+      <!-- 深色画布：A4 实时预览（多页时自动显示多张纸） -->
       <main class="canvas">
         <div class="paper">
-          <iframe v-if="previewSrc" :src="previewSrc" title="简历实时预览"></iframe>
+          <iframe
+            v-if="previewSrc" :src="previewSrc" title="简历实时预览"
+            :style="{ height: iframeHeight + 'px' }"
+          ></iframe>
         </div>
       </main>
     </div>
@@ -323,8 +344,12 @@
     <AISettingsDialog v-model="showAISettings" />
     <AIPolishDialog ref="polishDialog" v-model="showPolish" :target="polishTarget" @apply="applyPolish" />
     <AIOptimizeAllDialog
-      ref="optimizeAllDialog" v-model="showOptimizeAll" :tasks="optimizeTasks"
-      @item-done="onOptimizeItemDone" @restore="restoreSections"
+      ref="optimizeAllDialog" v-model="showOptimizeAll" :tasks="optimizeTasks" :has-backup="hasAIBackup"
+      @apply-report="onApplyOptimizeReport" @restore="restoreSections"
+    />
+    <AIJDGenerateDialog
+      ref="jdDialog" v-model="showJDGenerate" mode="fill"
+      @apply="onApplyJDGenerate"
     />
   </div>
 </template>
@@ -337,6 +362,7 @@ import RichTextEditor from '../components/RichTextEditor.vue'
 import AISettingsDialog from '../components/AISettingsDialog.vue'
 import AIPolishDialog from '../components/AIPolishDialog.vue'
 import AIOptimizeAllDialog from '../components/AIOptimizeAllDialog.vue'
+import AIJDGenerateDialog from '../components/AIJDGenerateDialog.vue'
 import api from '../api/resume'
 
 const route = useRoute()
@@ -347,6 +373,7 @@ const panelTab = ref('modules') // modules | text | style
 const activeSection = ref(0)
 const saveState = ref('saved') // saved | dirty | saving
 const previewSrc = ref('')
+const iframeHeight = ref(1123) // 由分页结果更新（页数 × A4 高度 + 页间距）
 
 const resume = reactive({
   id: 0, title: '',
@@ -547,11 +574,21 @@ onMounted(async () => {
   previewSrc.value = `/api/resumes/${resume.id}/preview?t=${Date.now()}`
   window.addEventListener('beforeunload', onBeforeUnload)
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('message', onPageHeight)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('message', onPageHeight)
 })
+
+// 简历纸张内分页完成后上报高度，iframe 随页数自动加高
+function onPageHeight(e) {
+  const d = e.data
+  if (d && d.type === 'resume-pages' && d.height > 0) {
+    iframeHeight.value = d.height
+  }
+}
 
 // ===== 保存：自动保存 + Ctrl+S / ⌘S =====
 let timer = null
@@ -602,8 +639,58 @@ async function saveNow() {
   }
 }
 
-// ===== 下载导出 =====
+// ===== 下载导出 & 模板导入 =====
 const extOf = { pdf: '.pdf', docx: '.doc', md: '.md' }
+const mdFileInput = ref(null)
+const importingMd = ref(false)
+
+function onTemplateCommand(cmd) {
+  if (cmd === 'download') {
+    window.open(api.templateUrl(), '_blank')
+  } else if (cmd === 'import') {
+    if (mdFileInput.value) {
+      mdFileInput.value.value = ''
+      mdFileInput.value.click()
+    }
+  }
+}
+
+async function onMdFileSelected(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  try {
+    await ElMessageBox.confirm(
+      '导入模板将使用文件中的内容覆盖当前简历的基本信息与各模块内容（配色与样式设置保持不变），确定继续吗？',
+      '导入 Markdown 模板',
+      { type: 'warning', confirmButtonText: '确认导入', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  importingMd.value = true
+  try {
+    const content = await file.text()
+    const r = await api.importMarkdown({ resumeId: resume.id, content })
+    hydrating.value = true
+    resume.title = r.title || resume.title
+    const b = r.basicInfo || {}
+    basic.name = b.name || ''
+    basic.intent = b.intent || ''
+    basic.avatar = b.avatar || ''
+    basic.fields = b.fields || []
+    resume.sections = (r.sections || []).map((s) => ({
+      ...s,
+      items: (s.items || []).map((it) => ({ ...it, tagsStr: (it.tags || []).join('、') }))
+    }))
+    await nextTick()
+    hydrating.value = false
+    saveState.value = 'saved'
+    previewSrc.value = `/api/resumes/${resume.id}/preview?t=${Date.now()}`
+    ElMessage.success('模板已导入并完成渲染')
+  } catch { /* 拦截器已提示 */ } finally {
+    importingMd.value = false
+  }
+}
 
 async function download(format) {
   await saveNow()
@@ -628,10 +715,21 @@ async function download(format) {
 const showAISettings = ref(false)
 const showPolish = ref(false)
 const showOptimizeAll = ref(false)
+const showJDGenerate = ref(false)
 const polishTarget = ref(null)
 const optimizeTasks = ref([])
 const polishDialog = ref(null)
 const optimizeAllDialog = ref(null)
+const jdDialog = ref(null)
+const hasAIBackup = ref(false)
+
+watch(
+  () => resume.id,
+  (id) => {
+    hasAIBackup.value = Boolean(id && localStorage.getItem('aiBackup:' + id))
+  },
+  { immediate: true }
+)
 
 async function ensureAIReady() {
   try {
@@ -650,9 +748,47 @@ async function ensureAIReady() {
 function onAICommand(cmd) {
   if (cmd === 'settings') {
     showAISettings.value = true
+  } else if (cmd === 'jd') {
+    startJDGenerate()
   } else if (cmd === 'all') {
     startOptimizeAll()
+  } else if (cmd === 'restore') {
+    restoreSections()
   }
+}
+
+function startJDGenerate() {
+  ensureAIReady().then((ok) => {
+    if (!ok) return
+    jdDialog.value?.open()
+    showJDGenerate.value = true
+  })
+}
+
+function onApplyJDGenerate(payload) {
+  localStorage.setItem('aiBackup:' + resume.id, JSON.stringify(sectionsToSave()))
+  hasAIBackup.value = true
+  if (payload.title && (!resume.title || resume.title === '我的简历' || resume.title === '未命名简历')) {
+    resume.title = payload.title
+  }
+  if (payload.intent) {
+    basic.intent = payload.intent
+  }
+  const genMap = new Map((payload.sections || []).map((s) => [s.type, s]))
+  resume.sections = resume.sections.map((curSec) => {
+    if (!payload.selectedTypes.has(curSec.type) || !genMap.has(curSec.type)) {
+      return curSec
+    }
+    const nextSec = genMap.get(curSec.type)
+    return {
+      ...nextSec,
+      items: (nextSec.items || []).map((it) => ({
+        ...it,
+        tagsStr: (it.tags || []).join('、')
+      }))
+    }
+  })
+  ElMessage.success('已根据 JD 填充所选模块，请结合实际情况微调细节')
 }
 
 function polishItem(s, item) {
@@ -695,7 +831,7 @@ function applyPolish(html) {
   else t.item.desc = html
 }
 
-// 整份优化：收集所有已填写内容（未开启模块跳过），备份后逐条处理
+// 整份优化：收集所有已填写内容（未开启模块跳过），生成比对报告后由用户确认采纳
 function startOptimizeAll() {
   ensureAIReady().then((ok) => {
     if (!ok) return
@@ -714,16 +850,21 @@ function startOptimizeAll() {
         }
       }
     }
-    localStorage.setItem('aiBackup:' + resume.id, JSON.stringify(sectionsToSave()))
     optimizeTasks.value = tasks
     optimizeAllDialog.value?.open()
     showOptimizeAll.value = true
   })
 }
 
-function onOptimizeItemDone(task, html) {
-  if (task.kind === 'section-content') task.section.content = htmlToPlainLines(html)
-  else task.item.desc = html
+// 用户在比对报告中点击「确认应用所选」后，备份当前内容并批量回填所选结果
+function onApplyOptimizeReport(payload) {
+  localStorage.setItem('aiBackup:' + resume.id, JSON.stringify(sectionsToSave()))
+  hasAIBackup.value = true
+  for (const { task, merged } of payload) {
+    if (!merged) continue
+    if (task.kind === 'section-content') task.section.content = merged
+    else task.item.desc = merged
+  }
 }
 
 function restoreSections() {
@@ -945,16 +1086,13 @@ onBeforeRouteLeave(async () => {
 .add-item { width: 100%; border-style: dashed; }
 .panel-bottom-space { height: 24px; }
 
-/* 深色画布 + A4 纸张 */
+/* 深色画布 + A4 纸张（多页高度由模板内分页脚本上报） */
 .canvas {
   flex: 1; min-width: 0; overflow: auto;
   background: linear-gradient(rgb(62,76,94) 0%, rgb(74,85,104) 50%, rgb(45,55,72) 100%);
   padding: 40px 20px 60px;
   display: flex; justify-content: center; align-items: flex-start;
 }
-.paper {
-  width: 794px; flex-shrink: 0; background: #fff; border-radius: 4px;
-  box-shadow: 0 8px 32px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.25); overflow: hidden;
-}
-.paper iframe { width: 794px; height: 1123px; border: none; display: block; background: #fff; }
+.paper { width: 794px; flex-shrink: 0; }
+.paper iframe { width: 794px; border: none; display: block; background: transparent; }
 </style>
