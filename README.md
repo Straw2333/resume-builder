@@ -1,6 +1,6 @@
 # 简历制作平台
 
-一个使用 **Go + Vue 3** 构建的本地简历管理 / 制作 / 导出平台。无需登录、零外部依赖（SQLite 单文件数据库），下载简历支持 PDF / Word / Mark。
+一个使用 **Go + Vue 3** 构建的本地简历管理 / 制作 / 导出平台。无需登录、零外部依赖（SQLite 单文件数据库），内置 AI 润色与根据岗位 JD 生成能力，下载简历支持 PDF / Word / Markdown。
 
 ![tech](https://img.shields.io/badge/Go-Gin%20%2B%20GORM-00ADD8) ![tech](https://img.shields.io/badge/Vue-3%20%2B%20Element%20Plus-42b883) ![db](https://img.shields.io/badge/DB-SQLite-003B57)
 
@@ -16,21 +16,27 @@
 
 | 模块 | 说明 |
 |---|---|
-| 基本信息 | 姓名与求职意向固定，其余字段可增删/开关/选图标 |
-| 教育背景 / 专业技能 / 实习经历 / 项目经历 / 荣誉证书 | 多条目，支持排序 |
+| 基本信息 | 姓名与求职意向固定，其余字段可增删/开关/选图标，支持头像上传 |
+| 教育背景 / 专业技能 / 实习经历 / 项目经历 / 荣誉证书 | 多条目，支持拖拽/上下排序 |
 | 自我评价 | 多行文本 |
-| 自定义模块 | 可添加多个（如「校园经历」），标题自拟 |
+| 自定义模块 | 可添加多个（如「开源经历」、「校园活动」），标题自拟 |
 
-**富文本描述**：条目描述支持加粗（Ctrl+B）、无序列表、有序列表、增减缩进（Tab / Shift+Tab），粘贴自动去格式；服务端白名单净化防 XSS，PDF/Word/Markdown 导出同步转换（加粗→`**粗体**` 等）。
+- **富文本描述**：条目描述支持加粗（Ctrl+B）、无序列表、有序列表、增减缩进（Tab / Shift+Tab），粘贴自动去格式；服务端白名单净化防 XSS，PDF/Word/Markdown 导出同步转换（加粗→`**粗体**` 等）。
+- **Markdown 快捷输入**：描述框内输入 `- 项目描述`、`1. 内容` 后按空格（或整行输完按回车）即自动转为对应列表；`**重点**` 后按空格自动加粗；粘贴带 `- ` / `1. ` / `**加粗**` 标记的纯文本也会直接结构化。
+- **模板导入与下载**：支持一键下载标准 Markdown 填写模板（.md）；支持上传导入外部 Markdown 简历，服务端深度语法解析，既可一键新建简历，也可一键导入覆盖已有简历（自动保留原有主题色彩与排版样式）。
 
-**Markdown 快捷输入**：描述框内输入 `- 项目描述`、`1. 内容` 后按空格（或整行输完按回车）即自动转为对应列表；`**重点**` 后按空格自动加粗；粘贴带 `- ` / `1. ` / `**加粗**` 标记的纯文本也会直接结构化。
+### AI 智能辅助（本地配置 Key，多协议兼容）
+- **根据 JD 定向生成简历**：输入目标岗位的招聘 JD，大模型自动提取岗位核心要求与意向，生成量身定制的项目经历与技能点，并支持按模块精准按需填充。
+- **整份简历优化与 Diff 报告**：一键并行优化全篇经历条目（遵循 STAR 原则），生成左右可视差异报告（高亮增删改），支持全选或逐条选择采纳；优化前自动备份，支持随时**一键恢复**。
+- **单条精准润色与多轮追问**：针对单条项目/工作经历进行深度润色（提供强化数据、精简表达、突出成果等多种预设方向），并支持在弹窗内通过自然语言多轮追问微调。
+- **多协议与私有模型支持**：支持 OpenAI / Claude 兼容协议接口，自由配置 API Key、Base URL 与 Model 名称，可无缝对接 DeepSeek、Kimi、通义千问、Claude、ChatGPT 等海内外主流大模型或本地 Ollama。
 
 ### 样式定制
-- **分页预览**：预览与 PDF 导出按 A4（794×1123px）分页，内容超过一页时自动「智能合页」——以条目为单位整块换页、不在行中间截断，跨页模块自动补「模块名（续）」标题，PDF 页数与预览一致
-- **文字**：中文字体（雅黑/苹方/思源/宋体/黑体/楷体）、英文字体（Arial/Times/Georgia 等）、正文字号（12–18px）、行间距（1.2–2.4）
-- **样式**：头部布局（居中/居左/平铺）、信息展示（图标/文字/纯内容）
-- **配色**：标题底色 + 强调色取色器，内置蓝黑/墨黑/青碧/酒红预设
-- 基本信息字段预置：性别、年龄、**政治面貌**、籍贯、生日、学历、微信、GitHub、个人主页、工作年限等，支持自定义字段；15 种 lucide 风格图标可选
+- **A4 智能分页预览**：预览与 PDF 导出按标准 A4（794×1123px）分页，内容超过一页时自动「智能合页」——以条目为单位整块换页、不在行中间截断，跨页模块自动补「模块名（续）」标题，PDF 页数与预览完全一致。
+- **文字**：中文字体（雅黑/苹方/思源/宋体/黑体/楷体）、英文字体（Arial/Times/Georgia 等）、正文字号（12–18px）、行间距（1.2–2.4）。
+- **样式**：头部布局（居中/居左/平铺）、信息展示（图标/文字/纯内容）、编辑面板支持自由拖拽调节宽度。
+- **配色**：标题底色 + 强调色取色器，内置蓝黑/墨黑/青碧/酒红预设。
+- **信息展示**：预置性别、年龄、政治面貌、籍贯、生日、学历、微信、GitHub、个人主页、工作年限等，支持自定义字段与 15+ 种精美图标切换。
 
 ### 导出
 | 格式 | 实现方式 | 说明 |
@@ -54,23 +60,32 @@
 ```
 Resume/
 ├── server/                  # Go 后端
-│   ├── main.go              # 路由、预览/导出接口、模板 embed
-│   ├── model/resume.go      # GORM 模型与默认数据
-│   ├── api/resume.go        # CRUD Handler（含 ID 校验防注入）
+│   ├── main.go              # 路由、静态嵌入、自动拉起浏览器
+│   ├── model/               # 数据模型（Resume、Setting）
+│   ├── api/
+│   │   ├── resume.go        # 简历 CRUD、模板下载与导入
+│   │   └── ai.go            # AI 配置、单条润色、整份优化、JD 生成
 │   ├── service/
-│   │   ├── render.go        # 数据解析、归一化、HTML 渲染
-│   │   ├── render_md.go     # Markdown 渲染
-│   │   ├── richtext.go      # 富文本白名单净化 + MD 转换
-│   │   └── export.go        # 无头浏览器 PDF 导出（45s 超时）
-│   ├── template/resume.html # 简历纸张模板（预览/PDF/Word 共用）
-│   └── data/resume.db       # SQLite 数据库（运行时生成）
+│   │   ├── render.go        # 数据归一化与 HTML 渲染
+│   │   ├── render_md.go     # 双向 Markdown 解析与模板渲染
+│   │   ├── richtext.go      # 富文本白名单净化 + HTML/MD 互转
+│   │   ├── llm.go           # OpenAI/Claude 协议客户端封装
+│   │   └── export.go        # Chrome/Edge 无头浏览器 PDF 导出
+│   ├── template/resume.html # A4 智能分页简历渲染模板
+│   └── data/resume.db       # SQLite 本地数据库（运行时生成，不入库）
 └── web/                     # Vue 3 前端
     └── src/
-        ├── views/           # List / Editor / Preview
+        ├── views/           # List（管理列表） / Editor（主编辑台） / Preview（大图预览）
         ├── components/
-        │   └── RichTextEditor.vue  # 富文本描述编辑器
-        ├── api/resume.js    # axios 封装
-        └── router/          # 路由
+        │   ├── RichTextEditor.vue      # Markdown 快捷富文本编辑器
+        │   ├── AISettingsDialog.vue    # 大模型接口/Key 设置弹窗
+        │   ├── AIPolishDialog.vue      # 单条精准润色与追问弹窗
+        │   ├── AIOptimizeAllDialog.vue # 整份优化 Diff 比对与采纳弹窗
+        │   └── AIJDGenerateDialog.vue  # 基于岗位 JD 生成简历内容弹窗
+        ├── utils/
+        │   └── aiDiff.js               # 词级/行级差异对比高亮算法
+        ├── api/resume.js    # 后端接口请求封装
+        └── router/          # 前端路由
 ```
 
 ## 快速开始
@@ -154,13 +169,21 @@ CMD ["resume-server"]
 
 ## API 一览
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET / POST | `/api/resumes` | 列表 / 新建 |
-| GET / PUT / DELETE | `/api/resumes/:id` | 详情 / 保存 / 删除 |
-| POST | `/api/resumes/:id/duplicate` | 复制 |
-| GET | `/api/resumes/:id/preview` | HTML 预览 |
-| GET | `/api/resumes/:id/export?format=pdf\|docx\|md` | 导出下载 |
+| 分组 | 方法 | 路径 | 说明 |
+|---|---|---|---|
+| **简历基础** | GET / POST | `/api/resumes` | 简历列表 / 新建空简历 |
+| | GET / PUT / DELETE | `/api/resumes/:id` | 简历详情 / 自动保存 / 删除 |
+| | POST | `/api/resumes/:id/duplicate` | 快速复制简历 |
+| | GET | `/api/resumes/:id/preview` | HTML 实时分页渲染预览 |
+| | GET | `/api/resumes/:id/export?format=pdf\|docx\|md` | 导出下载（PDF/Word/Markdown） |
+| **模板交互** | GET | `/api/resumes/template` | 下载标准 Markdown 简历填写模板 |
+| | POST | `/api/resumes/import` | 导入 Markdown 内容（支持覆盖或新建） |
+| **图片上传** | POST | `/api/upload` | 头像与图片上传 |
+| | GET | `/api/uploads/:name` | 静态图片资源访问 |
+| **AI 接口** | GET / PUT | `/api/ai/settings` | 获取 / 保存大模型 API 接口配置 |
+| | POST | `/api/ai/test` | 连通性测试 |
+| | POST | `/api/ai/polish` | 单条经历内容润色 / 多轮追问微调 |
+| | POST | `/api/ai/generate-from-jd` | 根据岗位招聘 JD 定向生成简历内容 |
 
 ## 数据模型
 
